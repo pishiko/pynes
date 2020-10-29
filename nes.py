@@ -20,12 +20,19 @@ class NES():
     def run(self):
         while True:
             self.cycle()
-            plt.imshow(self.frame)
-            plt.show()
+            # plt.imshow(self.frame)
+            # plt.show()
 
 if __name__ == "__main__":
     import main
+    import threading
+    from renderer import Renderer
+
     prg,chr = main.read_rom("roms/sample1.nes")
 
     nes = NES(prg,chr)
-    nes.run()
+    t = threading.Thread(target=nes.run)
+    t.setDaemon(True)
+    t.start()
+    renderer = Renderer(nes)
+    renderer.run()
