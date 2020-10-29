@@ -1,6 +1,6 @@
 import numpy as np
 
-class Reg():
+class CPUReg():
     def __init__(self):
         self.reg8 = np.array([0,0,0,0],dtype=np.uint8)
         self.reg16 = np.array([0],dtype=np.uint16)
@@ -50,8 +50,10 @@ class Reg():
 
 
 class CPU():
-    def __init__(self,prg):
+    def __init__(self,prg,ppu):
         self.prg_rom = prg
+        self.ppu = ppu
+
         self.optable = (
             #0x00
             (self.BRK, self.implied), (self.ORA, self.Xindirect), (None, None), (None, None), (None, None), (self.ORA, self.zeropage), (self.ASL, self.zeropage), (None, None), (self.PHP, self.implied), (self.ORA, self.immediate), (self.ASL, self.accumulator), (None, None), (None, None), (self.ORA, self.absolute), (self.ASL, self.absolute), (None, None),
@@ -90,16 +92,15 @@ class CPU():
         self.reset()
 
     def reset(self):
-        self.reg:Reg = Reg()
-        self.ppu = np.zeros(0x0008,dtype=np.uint8)
+        self.reg:CPUReg = CPUReg()
         self.wram = np.zeros(0x0800,dtype=np.uint8)
         self.reg.PC = self.read(0xfffd) << 8 + self.read(0xfffc)
 
     def read(self,addr):
         if addr < 0x2000:
             return self.wram[addr]
-        elif addr < 0x4000:
-            return self.ppu[addr-0x2000]
+        elif addr < 0x2008:
+            return self.ppu.reg[addr-0x2000]
         elif addr < 0xFFFF:
             return self.prg_rom[addr-0x8000]
 
@@ -107,7 +108,7 @@ class CPU():
         if addr < 0x0800:
             self.wram[addr] = data
         elif addr < 0x2008:
-            self.ppu[addr-0x2000] = data
+            self.ppu.write_reg(addr-0x2000,data)
         elif addr < 0x4020:
             #TODO APU,PAD
             raise Exception("WRITE APUPAD")
@@ -118,6 +119,8 @@ class CPU():
         opcode = self.read(self.reg.PC)
         self.reg.PC += 0x0001
         self.excute(opcode)
+        #TODO CYCLE
+        return 1
 
     def excute(self,opcode):
         op,addr = self.optable[opcode]
@@ -151,7 +154,7 @@ class CPU():
         return (self.read(self.reg.PC - 0x01) << 8) + self.read(self.reg.PC - 0x02)
     def absoluteX(self):
         self.reg.PC += 0x02
-        return (self.read(self.reg.PC - 0x01) << 8) + self.read(self.reg.PC - 0x02) + self.reg.X
+        return self.read((self.read(self.reg.PC - 0x01) << 8) + self.read(self.reg.PC - 0x02) + self.reg.X)
     def absoluteY(self):
         self.reg.PC += 0x02
         return (self.read(self.reg.PC - 0x01) << 8) + self.read(self.reg.PC - 0x02) + self.reg.Y
