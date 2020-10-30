@@ -75,6 +75,6 @@ if __name__ == '__main__':
     import ppu,threading
     from cpu import CPU
 
-    prg,chr = read_rom("roms/sample1.nes")
+    prg,chr = read_rom("roms/giko005.nes")
     print(len(prg))
-    show_chr(chr)
+    show_chr(chr,save=True)

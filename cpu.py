@@ -51,6 +51,7 @@ class CPUReg():
 
 class CPU():
     def __init__(self,prg,ppu):
+        self.ISDEBUG = False
         self.prg_rom = prg
         self.ppu = ppu
 
@@ -110,6 +111,10 @@ class CPU():
         self.reg: CPUReg = CPUReg()
         self.wram = np.zeros(0x0800, dtype=np.uint8)
 
+        self.joypad_count = 0
+        self.is_can_input_reset = False
+        self.joypad_inputs = np.array([False]*8,dtype=np.bool)
+
         #init regs
         self.reg.R = True
         self.reg.S = 0x01fd
@@ -121,17 +126,37 @@ class CPU():
             return self.wram[addr]
         elif addr < 0x2008:
             return self.ppu.reg[addr-0x2000]
+        elif addr < 0x4000:
+            raise Exception("READ PPU MIRROR")
+        elif addr < 0x4020:
+            if addr == 0x4016:
+                ret = 0b1 if self.joypad_inputs[self.joypad_count] else 0b0
+                #self.joypad_inputs[self.joypad_count] = False
+                self.joypad_count += 1
+                return int(ret)
+            else:
+                raise Exception("READ IO/APU ERROR")
         elif addr < 0xFFFF:
+            l = len(self.prg_rom)
             return self.prg_rom[addr-0x8000]
 
     def write(self,addr,data):
         if addr < 0x0800:
             self.wram[addr] = data
+        elif addr < 0x2000:
+            raise Exception("WRITE WRAm MIRROR")
         elif addr < 0x2008:
             self.ppu.write_reg(addr-0x2000,data)
+        elif addr < 0x4000:
+            raise Exception("WRITE PPU MIRROR")
         elif addr < 0x4020:
-            #TODO APU,PAD
-            raise Exception("WRITE APUPAD")
+            if addr == 0x4016:
+                if data & 0b1:
+                    self.is_can_input_reset = True
+                elif self.is_can_input_reset:
+                    self.is_can_input_reset = False
+                    self.joypad_count = 0
+                    #self.joypad_inputs.fill(False)
         else:
             self.prg_rom[addr-0x8000] = data
 
@@ -152,9 +177,13 @@ class CPU():
 
     def excute(self,opcode):
         op,addr = self.op_table[opcode]
-        print("[0x{0:02x}] OP 0x{1:02x} {3} {2}(".format(self.reg.PC,opcode,op.__name__,addr.__name__),end="")
+        #TODO
+        if self.ISDEBUG:
+            print("[0x{0:02x}] OP 0x{1:02x} {3} {2}(".format(self.reg.PC,opcode,op.__name__,addr.__name__),end="")
         a = addr()
-        print(hex(a)+")" if a is not None else ")")
+        #TODO
+        if self.ISDEBUG:
+            print(hex(a)+")" if a is not None else ")")
         if not a is None:
             op(a)
         else:
@@ -188,16 +217,16 @@ class CPU():
         return (self.read(self.reg.PC - 0x01) << 8) + self.read(self.reg.PC - 0x02) + self.reg.Y
     def indirect(self):
         self.reg.PC += 0x02
-        addr = self.read(self.reg.PC - 0x01) << 8 + self.read(self.reg.PC - 0x02)
+        addr = (self.read(self.reg.PC - 0x01) << 8) + self.read(self.reg.PC - 0x02)
         return self.read(addr+0x01) << 8 + self.read(addr)
     def Xindirect(self):
         self.reg.PC += 0x01
         ind = self.read(self.reg.PC - 0x01) + self.reg.X
-        return self.read(ind+0x01) << 8 + self.read(ind)
+        return (self.read(ind+0x01) << 8) + self.read(ind)
     def indirectY(self):
         self.reg.PC += 0x01
         ind = self.read(self.reg.PC - 0x01)
-        return self.read(ind + 1) << 8 + self.read(ind) + self.reg.Y
+        return (self.read(ind + 1) << 8) + self.read(ind) + self.reg.Y
     def relative(self):
         self.reg.PC += 0x01
         return self.reg.PC + np.int8(self.read(self.reg.PC - 0x01))
@@ -329,7 +358,7 @@ class CPU():
         self.push(word & 0xff)
         self.reg.PC = addr
         return
-    def RTS(self,addr):
+    def RTS(self):
         wlow = self.pop()
         wup = self.pop()
         self.reg.PC = ((wup >> 8) + wlow) + 0x0001
@@ -502,7 +531,12 @@ class CPU():
 
     def RESET(self):
         self.reg.I = True
-        self.reg.PC = (self.read(0xfffd) << 8) + self.read(0xfffc)
+        #TODO
+        try:
+            self.reg.PC = (self.read(0xfffd) << 8) + self.read(0xfffc)
+        except:
+            self.reg.PC = 0x8000
+        return
 
 if __name__ == "__main__":
     import main
