@@ -6,7 +6,7 @@ class CPUReg():
         self.reg16 = np.array([0],dtype=np.uint16)
         self.N = False
         self.V = False
-        self.R = True
+        self.R = False
         self.B = False
         self.D = False
         self.I = False
@@ -54,7 +54,7 @@ class CPU():
         self.prg_rom = prg
         self.ppu = ppu
 
-        self.optable = (
+        self.op_table = (
             #0x00
             (self.BRK, self.implied), (self.ORA, self.Xindirect), (None, None), (None, None), (None, None), (self.ORA, self.zeropage), (self.ASL, self.zeropage), (None, None), (self.PHP, self.implied), (self.ORA, self.immediate), (self.ASL, self.accumulator), (None, None), (None, None), (self.ORA, self.absolute), (self.ASL, self.absolute), (None, None),
             #0x10
@@ -88,13 +88,33 @@ class CPU():
             #0xf0
             (self.BEQ, self.relative), (self.SBC, self.indirectY), (None, None), (None, None), (None, None), (self.SBC, self.zeropageX), (self.INC, self.zeropageX), (None, None), (self.SED, self.implied), (self.SBC, self.absoluteY), (None, None), (None, None), (None, None), (self.SBC, self.absoluteX), (self.INC, self.absoluteX), (None, None),
         )
+        self.cycle_table = (
+            7, 6, 2, 8, 3, 3, 5, 5, 3, 2, 2, 2, 4, 4, 6, 6,
+            2, 5, 2, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 6, 7,
+            6, 6, 2, 8, 3, 3, 5, 5, 4, 2, 2, 2, 4, 4, 6, 6,
+            2, 5, 2, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 6, 7,
+            6, 6, 2, 8, 3, 3, 5, 5, 3, 2, 2, 2, 3, 4, 6, 6,
+            2, 5, 2, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 6, 7,
+            6, 6, 2, 8, 3, 3, 5, 5, 4, 2, 2, 2, 5, 4, 6, 6,
+            2, 5, 2, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 6, 7,
+            2, 6, 2, 6, 3, 3, 3, 3, 2, 2, 2, 2, 4, 4, 4, 4,
+            2, 6, 2, 6, 4, 4, 4, 4, 2, 4, 2, 5, 5, 4, 5, 5,
+            2, 6, 2, 6, 3, 3, 3, 3, 2, 2, 2, 2, 4, 4, 4, 4,
+            2, 5, 2, 5, 4, 4, 4, 4, 2, 4, 2, 4, 4, 4, 4, 4,
+            2, 6, 2, 8, 3, 3, 5, 5, 2, 2, 2, 2, 4, 4, 6, 6,
+            2, 5, 2, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7,
+            2, 6, 3, 8, 3, 3, 5, 5, 2, 2, 2, 2, 4, 4, 6, 6,
+            2, 5, 2, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7,
+        )
 
-        self.reset()
+        self.reg: CPUReg = CPUReg()
+        self.wram = np.zeros(0x0800, dtype=np.uint8)
 
-    def reset(self):
-        self.reg:CPUReg = CPUReg()
-        self.wram = np.zeros(0x0800,dtype=np.uint8)
-        self.reg.PC = self.read(0xfffd) << 8 + self.read(0xfffc)
+        #init regs
+        self.reg.R = True
+        self.reg.S = 0x01fd
+
+        self.RESET()
 
     def read(self,addr):
         if addr < 0x2000:
@@ -115,15 +135,23 @@ class CPU():
         else:
             self.prg_rom[addr-0x8000] = data
 
+    def push(self,data):
+        self.write(self.reg.S,data)
+        self.reg.S -= 0x0001
+        return
+
+    def pop(self):
+        self.reg.S += 0x0001
+        return self.read(self.reg.S)
+
     def run(self):
         opcode = self.read(self.reg.PC)
         self.reg.PC += 0x0001
         self.excute(opcode)
-        #TODO CYCLE
-        return 1
+        return self.cycle_table[opcode]
 
     def excute(self,opcode):
-        op,addr = self.optable[opcode]
+        op,addr = self.op_table[opcode]
         print("[0x{0:02x}] OP 0x{1:02x} {3} {2}(".format(self.reg.PC,opcode,op.__name__,addr.__name__),end="")
         a = addr()
         print(hex(a)+")" if a is not None else ")")
@@ -139,22 +167,22 @@ class CPU():
         return None
     def immediate(self):
         self.reg.PC += 0x01
-        return self.read(self.reg.PC - 0x01)
+        return self.reg.PC - 0x01
     def zeropage(self):
         self.reg.PC += 0x01
-        return self.read(self.read(self.reg.PC - 0x01))
+        return self.read(self.reg.PC - 0x01)
     def zeropageX(self):
         self.reg.PC += 0x01
-        return self.read(self.read(self.reg.PC - 0x01)+self.reg.X)
+        return self.read(self.reg.PC - 0x01)+self.reg.X
     def zeropageY(self):
         self.reg.PC += 0x01
-        return self.read(self.read(self.reg.PC - 0x01)+self.reg.Y)
+        return self.read(self.reg.PC - 0x01)+self.reg.Y
     def absolute(self):
         self.reg.PC += 0x02
         return (self.read(self.reg.PC - 0x01) << 8) + self.read(self.reg.PC - 0x02)
     def absoluteX(self):
         self.reg.PC += 0x02
-        return self.read((self.read(self.reg.PC - 0x01) << 8) + self.read(self.reg.PC - 0x02) + self.reg.X)
+        return (self.read(self.reg.PC - 0x01) << 8) + self.read(self.reg.PC - 0x02) + self.reg.X
     def absoluteY(self):
         self.reg.PC += 0x02
         return (self.read(self.reg.PC - 0x01) << 8) + self.read(self.reg.PC - 0x02) + self.reg.Y
@@ -165,68 +193,91 @@ class CPU():
     def Xindirect(self):
         self.reg.PC += 0x01
         ind = self.read(self.reg.PC - 0x01) + self.reg.X
-        return self.read(self.read(ind+0x01) << 8 + self.read(ind))
+        return self.read(ind+0x01) << 8 + self.read(ind)
     def indirectY(self):
         self.reg.PC += 0x01
         ind = self.read(self.reg.PC - 0x01)
-        return self.read(self.read(ind + 1) << 8 + self.read(ind) + self.reg.Y)
+        return self.read(ind + 1) << 8 + self.read(ind) + self.reg.Y
     def relative(self):
         self.reg.PC += 0x01
         return self.reg.PC + np.int8(self.read(self.reg.PC - 0x01))
 
     #Operation
-    #TODO
-    #V,C flag
+
+    def set_nz(self,a):
+        self.reg.N = a >> 7
+        self.reg.Z = a == 0x00
+        return
+
+    def get_stat_reg(self):
+        p = self.reg.N << 7 + self.reg.V << 6 + self.reg.R << 5\
+            + self.reg.B << 4 + self.reg.D << 3 + self.reg.I << 2\
+            + self.reg.Z << 1 + self.reg.C
+        return p
+
+    def set_stat_reg(self,p):
+        self.N = p >> 7 & 0x01
+        self.V = p >> 6 & 0x01
+        self.R = p >> 5 & 0x01
+        self.B = p >> 4 & 0x01
+        self.D = p >> 3 & 0x01
+        self.I = p >> 2 & 0x01
+        self.Z = p >> 1 & 0x01
+        self.C = p & 0x01
+        return
 
     #演算
     def ADC(self,M):
-        self.reg.A += M
-        self.reg.N = self.reg.A >> 7
-        self.reg.Z = self.reg.A == 0x00
+        m = self.read(M)
+        ans = self.reg.A + m + self.reg.C
+        self.reg.C = ans > 0xff
+        self.reg.V = (self.reg.A^m)&0x80 == 0x00\
+             and (self.reg.A^ans)&0x80 != 0x00
+        self.reg.A = ans
+        self.set_nz(self.reg.A)
         return
+
     def SBC(self,M):
-        self.reg.A -= M
-        self.reg.N = self.reg.A >> 7
-        self.reg.Z = self.reg.A == 0x00
+        m = self.read(M)
+        ans = self.reg.A - m - (not self.reg.C)
+        self.reg.C = ans >= 0x00
+        self.reg.V = (self.reg.A ^ m) & 0x80 == 0x00\
+            and (self.reg.A ^ ans) & 0x80 != 0x00
+        self.reg.A = ans
+        self.set_nz(self.reg.A)
         return
+    
     #論理演算
     def AND(self,M):
-        self.reg.A = self.reg.A & M
-        self.reg.N = self.reg.A >> 7
-        self.reg.Z = self.reg.A == 0x00
+        self.reg.A = self.reg.A & self.read(M)
+        self.set_nz(self.reg.A)
         return
     def ORA(self,M):
-        self.reg.A = self.reg.A | M
-        self.reg.N = self.reg.A >> 7
-        self.reg.Z = self.reg.A == 0x00
+        self.reg.A = self.reg.A | self.read(M)
+        self.set_nz(self.reg.A)
         return
     def EOR(self,M):
-        self.reg.A = self.reg.A ^ M
-        self.reg.N = self.reg.A >> 7
-        self.reg.Z = self.reg.A == 0x00
+        self.reg.A = self.reg.A ^ self.read(M)
+        self.set_nz(self.reg.A)
         return
     #シフト，ローテーション
     def ASL(self):
         self.reg.C = self.reg.A >> 7
         self.reg.A = self.reg.A << 1
-        self.reg.N = self.reg.A >> 7
-        self.reg.Z = self.reg.A == 0x00
+        self.set_nz(self.reg.A)
         return
     def LSR(self):
         self.reg.C = self.reg.A & 0x01
         self.reg.A = self.reg.A >> 1
-        self.reg.N = self.reg.A >> 7
-        self.reg.Z = self.reg.A == 0x00
+        self.set_nz(self.reg.A)
         return
     def ROL(self):
         self.reg.C,self.reg.A = self.reg.A >> 7, self.reg.A << 1 + self.reg.C
-        self.reg.N = self.reg.A >> 7
-        self.reg.Z = self.reg.A == 0x00
+        self.set_nz(self.reg.A)
         return
     def ROR(self):
         self.reg.C,self.reg.A = self.reg.A & 0x01,self.reg.A >> 1 + self.reg.C << 7
-        self.reg.N = self.reg.A >> 7
-        self.reg.Z = self.reg.A == 0x00
+        self.set_nz(self.reg.A)
         return
     #条件分岐
     def BCC(self,addr):
@@ -263,63 +314,85 @@ class CPU():
         return
     #ビット検査
     def BIT(self,M):
-        self.reg.Z = bool(self.reg.A & M)
-        self.reg.N = M >> 7
-        self.reg.V = M >> 6 & 0x1
+        m = self.read(M)
+        self.reg.Z = bool(self.reg.A & m)
+        self.reg.N = m >> 7
+        self.reg.V = m >> 6 & 0x1
         return
     #ジャンプ
     def JMP(self,addr):
         self.reg.PC = addr
         return
     def JSR(self,addr):
-        pass
-        #TODO
+        word = self.reg.PC - 0x0001
+        self.push(word >> 8 & 0xff)
+        self.push(word & 0xff)
+        self.reg.PC = addr
+        return
     def RTS(self,addr):
-        pass
-        #TODO
-    #割り込み
+        wlow = self.pop()
+        wup = self.pop()
+        self.reg.PC = ((wup >> 8) + wlow) + 0x0001
+        return
+    #ソフトウェア割り込み
     def BRK(self):
-        pass
-        #TODO
+        if not self.reg.I:
+            self.reg.B = True
+            self.reg.PC += 0x0001
+            self.push(self.reg.PC >> 8)
+            self.push(self.reg.PC & 0xff)
+            self.push(self.get_stat_reg())
+            self.reg.I = True
+            self.reg.PC = (self.read(0xffff) >> 8) + self.read(0xfffe)
+            
     def RTI(self):
-        pass
-        #TODO
+        self.set_stat_reg(self.pop())
+        plow = self.pop()
+        pup = self.pop()
+        self.reg.PC = (pup >> 8) + plow
+        return
     #比較
-    def CMP(self):
-        pass
-        #TODO
-    def CPX(self):
-        pass
-        #TODO
-    def CPY(self):
-        pass
-        #TODO
+    def CMP(self,M):
+        a = self.reg.A - self.read(M)
+        self.reg.C = a >= 0x00
+        self.set_nz(a)
+        return
+    def CPX(self,M):
+        a = self.reg.X - self.read(M)
+        self.reg.C = a >= 0x00
+        self.set_nz(a)
+        return
+    def CPY(self,M):
+        a = self.reg.Y - self.read(M)
+        self.reg.C = a >= 0x00
+        self.set_nz(a)
+        return
     #インクリメント，デクリメント
-    def INC(self):
-        pass
-        #TODO
-    def DEC(self):
-        pass
-        #TODO
+    def INC(self,M):
+        a = self.read(M)+0x0001
+        self.write(M,a)
+        self.set_nz(a)
+        return
+    def DEC(self,M):
+        a = self.read(M)-0x0001
+        self.write(M, a)
+        self.set_nz(a)
+        return
     def INX(self):
         self.reg.X += 0x01
-        self.reg.N = self.reg.X >> 7
-        self.reg.Z = self.reg.X == 0x00
+        self.set_nz(self.reg.X)
         return
     def DEX(self):
         self.reg.X -= 0x01
-        self.reg.N = self.reg.X >> 7
-        self.reg.Z = self.reg.X == 0x00
+        self.set_nz(self.reg.X)
         return
     def INY(self):
         self.reg.Y += 0x01
-        self.reg.N = self.reg.Y >> 7
-        self.reg.Z = self.reg.Y == 0x00
+        self.set_nz(self.reg.Y)
         return
     def DEY(self):
         self.reg.Y -= 0x01
-        self.reg.N = self.reg.Y >> 7
-        self.reg.Z = self.reg.Y == 0x00
+        self.set_nz(self.reg.Y)
     #フラグ操作
     def CLC(self):
         self.reg.C = False
@@ -344,19 +417,16 @@ class CPU():
         return
     #ロード
     def LDA(self,M):
-        self.reg.A = M
-        self.reg.N = self.reg.A >> 7
-        self.reg.Z = self.reg.A == 0x00
+        self.reg.A = self.read(M)
+        self.set_nz(self.reg.A)
         return
     def LDX(self,M):
-        self.reg.X = M
-        self.reg.N = self.reg.X >> 7
-        self.reg.Z = self.reg.X == 0x00
+        self.reg.X = self.read(M)
+        self.set_nz(self.reg.X)
         return
     def LDY(self,M):
-        self.reg.Y = M
-        self.reg.N = self.reg.Y >> 7
-        self.reg.Z = self.reg.Y == 0x00
+        self.reg.Y = self.read(M)
+        self.set_nz(self.reg.Y)
         return
     #ストア
     def STA(self,M):
@@ -371,48 +441,68 @@ class CPU():
     #レジスタ間転送
     def TAX(self):
         self.reg.X = self.reg.A
-        self.reg.N = self.reg.X >> 7
-        self.reg.Z = self.reg.X == 0x00
+        self.set_nz(self.reg.X)
         return
     def TXA(self):
         self.reg.A = self.reg.X
-        self.reg.N = self.reg.A >> 7
-        self.reg.Z = self.reg.A == 0x00
+        self.set_nz(self.reg.A)
         return
     def TAY(self):
         self.reg.Y = self.reg.A
-        self.reg.N = self.reg.Y >> 7
-        self.reg.Z = self.reg.Y == 0x00
+        self.set_nz(self.reg.Y)
         return
     def TYA(self):
         self.reg.A = self.reg.Y
-        self.reg.N = self.reg.A >> 7
-        self.reg.Z = self.reg.A == 0x00
+        self.set_nz(self.reg.A)
         return
     def TSX(self):
         self.reg.X = self.reg.S
-        self.reg.N = self.reg.X >> 7
-        self.reg.Z = self.reg.X == 0x00
+        self.set_nz(self.reg.X)
         return
     def TXS(self):
         self.reg.S = self.reg.X
         return
     #スタック
     def PHA(self):
-        pass
-        #TODO
+        self.push(self.reg.A)
+        return
     def PLA(self):
-        pass
-        #TODO
+        self.reg.A = self.pop()
+        self.set_nz(self.reg.A)
     def PHP(self):
-        pass
-        #TODO
+        p = self.get_stat_reg()
+        self.push(p)
+        return
     def PLP(self):
-        pass
-        #TODO
+        p = self.pop()
+        self.set_stat_reg(p)
     #No Operation
     def NOP(self):
         return
+
+    #ハードウェア割り込み
+    def NMI(self):
+        self.reg.B = False
+        self.push(self.reg.PC >> 8)
+        self.push(self.reg.PC & 0xff)
+        self.push(self.get_stat_reg())
+        self.reg.I = True
+        self.reg.PC = (self.read(0xfffb) >> 8) + self.read(0xfffa)
+        return
+
+    def IRQ(self):
+        if not self.reg.I:
+            self.reg.B = False
+            self.push(self.reg.PC >> 8)
+            self.push(self.reg.PC & 0xff)
+            self.push(self.get_stat_reg())
+            self.reg.I = True
+            self.reg.PC = (self.read(0xffff) >> 8) + self.read(0xfffa)
+        return
+
+    def RESET(self):
+        self.reg.I = True
+        self.reg.PC = (self.read(0xfffd) << 8) + self.read(0xfffc)
 
 if __name__ == "__main__":
     import main

@@ -28,7 +28,7 @@ if __name__ == "__main__":
     import threading
     from renderer import Renderer
 
-    prg,chr = main.read_rom("roms/sample1.nes")
+    prg,chr = main.read_rom("roms/smb.nes")
 
     nes = NES(prg,chr)
     t = threading.Thread(target=nes.run)
